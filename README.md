@@ -54,7 +54,6 @@ mkdir -p build/assets
 mkdir -p build/lib/arm64-v8a
 
 # Compile binary
-# $ANDROID_CLANG -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -I./src -Os -DANDROID -DAPPNAME=\"questxrexample\" -Ideps/include -I$ANDROID_LIBS -I-I$ANDROID_LIBS/android -fPIC -DANDROIDVERSION=29 -m64 -o build/lib/arm64-v8a/libquestxrexample.so src/main.cpp deps/src/android_native_app_glue.c deps/lib/libopenxr_loader.so -L$ANDROID_LIBS_LINK -Wl,--gc-sections -s -lm -lGLESv3 -lEGL -landroid -llog -shared -uANativeActivity_onCreate
 $ANDROID_CLANG -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -m64 -Os -fPIC \
   -DANDROIDVERSION=29 -DANDROID -DAPPNAME=\"questxrexample\" \
   -Ideps/include -I./src -I$ANDROID_LIBS -I-I$ANDROID_LIBS/android \

@@ -54,7 +54,13 @@ mkdir -p build/assets
 mkdir -p build/lib/arm64-v8a
 
 # Compile binary
-$ANDROID_CLANG -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -I./src -Os -DANDROID -DAPPNAME=\"questxrexample\" -Ideps/include -I$ANDROID_LIBS -I-I$ANDROID_LIBS/android -fPIC -DANDROIDVERSION=29 -m64 -o build/lib/arm64-v8a/libquestxrexample.so src/main.cpp deps/src/android_native_app_glue.c deps/lib/libopenxr_loader.so -L$ANDROID_LIBS_LINK -Wl,--gc-sections -s -lm -lGLESv3 -lEGL -landroid -llog -shared -uANativeActivity_onCreate
+# $ANDROID_CLANG -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -I./src -Os -DANDROID -DAPPNAME=\"questxrexample\" -Ideps/include -I$ANDROID_LIBS -I-I$ANDROID_LIBS/android -fPIC -DANDROIDVERSION=29 -m64 -o build/lib/arm64-v8a/libquestxrexample.so src/main.cpp deps/src/android_native_app_glue.c deps/lib/libopenxr_loader.so -L$ANDROID_LIBS_LINK -Wl,--gc-sections -s -lm -lGLESv3 -lEGL -landroid -llog -shared -uANativeActivity_onCreate
+$ANDROID_CLANG -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -m64 -Os -fPIC \
+  -DANDROIDVERSION=29 -DANDROID -DAPPNAME=\"questxrexample\" \
+  -Ideps/include -I./src -I$ANDROID_LIBS -I-I$ANDROID_LIBS/android \
+  src/main.cpp deps/src/android_native_app_glue.c deps/lib/libopenxr_loader.so \
+  -L$ANDROID_LIBS_LINK -Wl,--gc-sections -s -lm -lGLESv3 -lEGL -landroid -llog -shared -uANativeActivity_onCreate \
+  -o build/lib/arm64-v8a/libquestxrexample.so
 
 # Copy assets, binaries into build directory and package with aapt
 cp -r assets build
@@ -93,6 +99,18 @@ Yes that's the point, of _course_ you want some sort of build automation. But yo
 want _your_ build automation. The point of these commands is to make it transparent so you
 can automate it for yourself! Whether that's using Make, CMake, or your own in-house build tool.
 
+## How to Rename
+
+You probably don't want my name all over your Quest 2 app. Here are all the locations you need to change. Implied
+is that you need to change the string `cshenton` to your org name and `questxrexample` to your app name.
+
+- `resources/values/strings.xml`
+- `src/AndroidManifest.xml`
+- The above build "script"
+  -  `-DAPPNAME=\"questxrexample\"`
+  - `-o build/lib/arm64-v8a/libquestxrexample.so`
+- The adb command
+  - `adb shell am start -n org.cshenton.questxrexample/android.app.NativeActivity && adb logcat >> logs.txt`
 ## Vendor Provenance
 
 Okay, but where did the vendored dependencies come from?

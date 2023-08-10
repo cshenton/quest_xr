@@ -19,8 +19,7 @@
 #include "openxr/openxr.h"
 #include "openxr/openxr_platform.h"
 
-// System value set by the OS
-static int g_is_window_init;
+static int g_window_is_init;
 
 // Globals
 struct android_app *gapp;
@@ -49,8 +48,7 @@ static EGLint const config_attribute_list[] = {
 
 extern "C" int __system_property_get( const char *__name, char *__value );
 
-extern "C" void handle_cmd( struct android_app *app, int32_t cmd )
-{
+extern "C" void handle_cmd( struct android_app *app, int32_t cmd ) {
 	switch ( cmd )
 	{
 	case APP_CMD_DESTROY:
@@ -60,9 +58,9 @@ extern "C" void handle_cmd( struct android_app *app, int32_t cmd )
 		break;
 	case APP_CMD_INIT_WINDOW:
 		//When returning from a back button suspension, this isn't called.
-		if ( !g_is_window_init )
+		if ( !g_window_is_init )
 		{
-			g_is_window_init = 1;
+			g_window_is_init = 1;
 			printf( "Got start event\n" );
 		}
 		else
@@ -82,8 +80,7 @@ extern "C" void handle_cmd( struct android_app *app, int32_t cmd )
 }
 
 
-extern "C" int32_t handle_input( struct android_app *app, AInputEvent *event )
-{
+extern "C" int32_t handle_input( struct android_app *app, AInputEvent *event ) {
 	//Potentially do other things here.
 
 	// if ( AInputEvent_getType( event ) == AINPUT_EVENT_TYPE_MOTION )
@@ -156,8 +153,7 @@ extern "C" void android_main(struct android_app *app) {
 	EGLint num_config;
 
 	int events;
-	while ( !g_is_window_init ) {
-		printf("Polling\n");
+	while ( !g_window_is_init ) {
 		struct android_poll_source *source;
 		if ( ALooper_pollAll( 0, 0, &events, (void **)&source ) >= 0 )
 		{
@@ -179,6 +175,7 @@ extern "C" void android_main(struct android_app *app) {
 		return;
 	}
 
+	printf("g_window_is_init_2\n");
 	printf( "EGL Version: \"%s\"\n", eglQueryString( egl_display, EGL_VERSION ) );
 	printf( "EGL Vendor: \"%s\"\n", eglQueryString( egl_display, EGL_VENDOR ) );
 	printf( "EGL Extensions: \"%s\"\n", eglQueryString( egl_display, EGL_EXTENSIONS ) );

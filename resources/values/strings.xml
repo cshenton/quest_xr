@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">questxrexample</string>
+    <string name="lib_name">questxrexample</string>
+    <string name="package_name">org.cshenton.questxrexample</string>
+</resources>

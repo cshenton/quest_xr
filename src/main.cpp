@@ -113,104 +113,228 @@ void main() {
 }
 )glsl";
 
-
-void matrix_from_pose(float* result, const XrPosef * pose) {
-	const float x2  = pose->orientation.x + pose->orientation.x;
-	const float y2  = pose->orientation.y + pose->orientation.y;
-	const float z2  = pose->orientation.z + pose->orientation.z;
-
-	const float xx2 = pose->orientation.x * x2;
-	const float yy2 = pose->orientation.y * y2;
-	const float zz2 = pose->orientation.z * z2;
-
-	const float yz2 = pose->orientation.y * z2;
-	const float wx2 = pose->orientation.w * x2;
-	const float xy2 = pose->orientation.x * y2;
-	const float wz2 = pose->orientation.w * z2;
-	const float xz2 = pose->orientation.x * z2;
-	const float wy2 = pose->orientation.w * y2;
-
-	result[0] = 1.0f - yy2 - zz2;
-	result[1] = xy2 + wz2;
-	result[2] = xz2 - wy2;
-	result[3] = 0.0f;
-
-	result[4] = xy2 - wz2;
-	result[5] = 1.0f - xx2 - zz2;
-	result[6] = yz2 + wx2;
-	result[7] = 0.0f;
-
-	result[8] = xz2 + wy2;
-	result[9] = yz2 - wx2;
-	result[10] = 1.0f - xx2 - yy2;
-	result[11] = 0.0f;
-
-	result[12] = pose->position.x;
-	result[13] = pose->position.y;
-	result[14] = pose->position.z;
-	result[15] = 1.0;
+void matrix_identity(float *result) {
+	result[0] = (1.0);
+	result[1] = (0.0);
+	result[2] = (0.0);
+	result[3] = (0.0);
+	result[4] = (0.0);
+	result[5] = (1.0);
+	result[6] = (0.0);
+	result[7] = (0.0);
+	result[8] = (0.0);
+	result[9] = (0.0);
+	result[10] = (1.0);
+	result[11] = (0.0);
+	result[12] = (0.0);
+	result[13] = (0.0);
+	result[14] = (0.0);
+	result[15] = (1.0);
 }
 
-void matrix_mul(float* result, const float* a, const float* b) {
-	result[0] = a[0] * b[0] + a[4] * b[1] + a[8] * b[2] + a[12] * b[3];
-	result[1] = a[1] * b[0] + a[5] * b[1] + a[9] * b[2] + a[13] * b[3];
-	result[2] = a[2] * b[0] + a[6] * b[1] + a[10] * b[2] + a[14] * b[3];
-	result[3] = a[3] * b[0] + a[7] * b[1] + a[11] * b[2] + a[15] * b[3];
-
-	result[4] = a[0] * b[4] + a[4] * b[5] + a[8] * b[6] + a[12] * b[7];
-	result[5] = a[1] * b[4] + a[5] * b[5] + a[9] * b[6] + a[13] * b[7];
-	result[6] = a[2] * b[4] + a[6] * b[5] + a[10] * b[6] + a[14] * b[7];
-	result[7] = a[3] * b[4] + a[7] * b[5] + a[11] * b[6] + a[15] * b[7];
-
-	result[8] = a[0] * b[8] + a[4] * b[9] + a[8] * b[10] + a[12] * b[11];
-	result[9] = a[1] * b[8] + a[5] * b[9] + a[9] * b[10] + a[13] * b[11];
-	result[10] = a[2] * b[8] + a[6] * b[9] + a[10] * b[10] + a[14] * b[11];
-	result[11] = a[3] * b[8] + a[7] * b[9] + a[11] * b[10] + a[15] * b[11];
-
-	result[12] = a[0] * b[12] + a[4] * b[13] + a[8] * b[14] + a[12] * b[15];
-	result[13] = a[1] * b[12] + a[5] * b[13] + a[9] * b[14] + a[13] * b[15];
-	result[14] = a[2] * b[12] + a[6] * b[13] + a[10] * b[14] + a[14] * b[15];
-	result[15] = a[3] * b[12] + a[7] * b[13] + a[11] * b[14] + a[15] * b[15];
+void matrix_translate(float *result, float* m0, float* v0) {
+	result[0] = m0[0];
+	result[1] = m0[1];
+	result[2] = m0[2];
+	result[3] = m0[3];
+	result[4] = m0[4];
+	result[5] = m0[5];
+	result[6] = m0[6];
+	result[7] = m0[7];
+	result[8] = m0[8];
+	result[9] = m0[9];
+	result[10] = m0[10];
+	result[11] = m0[11];
+	result[12] = m0[12] + v0[0];
+	result[13] = m0[13] + v0[1];
+	result[14] = m0[14] + v0[2];
+	result[15] = m0[15];
 }
 
-void matrix_invert(float* result, float* src) {
-	result[0] = src[0];
-	result[1] = src[4];
-	result[2] = src[8];
-	result[3] = 0.0f;
-	result[4] = src[1];
-	result[5] = src[5];
-	result[6] = src[9];
-	result[7] = 0.0f;
-	result[8] = src[2];
-	result[9] = src[6];
-	result[10] = src[10];
-	result[11] = 0.0f;
-	result[12] = -(src[0] * src[12] + src[1] * src[13] + src[2] * src[14]);
-	result[13] = -(src[4] * src[12] + src[5] * src[13] + src[6] * src[14]);
-	result[14] = -(src[8] * src[12] + src[9] * src[13] + src[10] * src[14]);
-	result[15] = 1.0f;
+void matrix_rotation_from_quat(float *result, float *q0) {
+	float xx = q0[0] * q0[0];
+	float yy = q0[1] * q0[1];
+	float zz = q0[2] * q0[2];
+	float xy = q0[0] * q0[1];
+	float zw = q0[2] * q0[3];
+	float xz = q0[0] * q0[2];
+	float yw = q0[1] * q0[3];
+	float yz = q0[1] * q0[2];
+	float xw = q0[0] * q0[3];
+	result[0] = (1.0) - (2.0) * (yy + zz);
+	result[1] = (2.0) * (xy + zw);
+	result[2] = (2.0) * (xz - yw);
+	result[3] = (0.0);
+	result[4] = (2.0) * (xy - zw);
+	result[5] = (1.0) - (2.0) * (xx + zz);
+	result[6] = (2.0) * (yz + xw);
+	result[7] = (0.0);
+	result[8] = (2.0) * (xz + yw);
+	result[9] = (2.0) * (yz - xw);
+	result[10] = (1.0) - (2.0) * (xx + yy);
+	result[11] = (0.0);
+	result[12] = (0.0);
+	result[13] = (0.0);
+	result[14] = (0.0);
+	result[15] = (1.0);
+}
+
+void matrix_inverse(float *result, float *m0) {
+	float inverse[16];
+	float inverted_determinant;
+	float m11 = m0[0];
+	float m21 = m0[1];
+	float m31 = m0[2];
+	float m41 = m0[3];
+	float m12 = m0[4];
+	float m22 = m0[5];
+	float m32 = m0[6];
+	float m42 = m0[7];
+	float m13 = m0[8];
+	float m23 = m0[9];
+	float m33 = m0[10];
+	float m43 = m0[11];
+	float m14 = m0[12];
+	float m24 = m0[13];
+	float m34 = m0[14];
+	float m44 = m0[15];
+	inverse[0] = m22 * m33 * m44
+		- m22 * m43 * m34
+		- m23 * m32 * m44
+		+ m23 * m42 * m34
+		+ m24 * m32 * m43
+		- m24 * m42 * m33;
+	inverse[4] = -m12 * m33 * m44
+		+ m12 * m43 * m34
+		+ m13 * m32 * m44
+		- m13 * m42 * m34
+		- m14 * m32 * m43
+		+ m14 * m42 * m33;
+	inverse[8] = m12 * m23 * m44
+		- m12 * m43 * m24
+		- m13 * m22 * m44
+		+ m13 * m42 * m24
+		+ m14 * m22 * m43
+		- m14 * m42 * m23;
+	inverse[12] = -m12 * m23 * m34
+		+ m12 * m33 * m24
+		+ m13 * m22 * m34
+		- m13 * m32 * m24
+		- m14 * m22 * m33
+		+ m14 * m32 * m23;
+	inverse[1] = -m21 * m33 * m44
+		+ m21 * m43 * m34
+		+ m23 * m31 * m44
+		- m23 * m41 * m34
+		- m24 * m31 * m43
+		+ m24 * m41 * m33;
+	inverse[5] =m11 * m33 * m44
+		-m11 * m43 * m34
+		- m13 * m31 * m44
+		+ m13 * m41 * m34
+		+ m14 * m31 * m43
+		- m14 * m41 * m33;
+	inverse[9] = -m11 * m23 * m44
+		+m11 * m43 * m24
+		+ m13 * m21 * m44
+		- m13 * m41 * m24
+		- m14 * m21 * m43
+		+ m14 * m41 * m23;
+	inverse[13] =m11 * m23 * m34
+		-m11 * m33 * m24
+		- m13 * m21 * m34
+		+ m13 * m31 * m24
+		+ m14 * m21 * m33
+		- m14 * m31 * m23;
+	inverse[2] = m21 * m32 * m44
+		- m21 * m42 * m34
+		- m22 * m31 * m44
+		+ m22 * m41 * m34
+		+ m24 * m31 * m42
+		- m24 * m41 * m32;
+	inverse[6] = -m11 * m32 * m44
+		+m11 * m42 * m34
+		+ m12 * m31 * m44
+		- m12 * m41 * m34
+		- m14 * m31 * m42
+		+ m14 * m41 * m32;
+	inverse[10] =m11 * m22 * m44
+		-m11 * m42 * m24
+		- m12 * m21 * m44
+		+ m12 * m41 * m24
+		+ m14 * m21 * m42
+		- m14 * m41 * m22;
+	inverse[14] = -m11 * m22 * m34
+		+m11 * m32 * m24
+		+ m12 * m21 * m34
+		- m12 * m31 * m24
+		- m14 * m21 * m32
+		+ m14 * m31 * m22;
+	inverse[3] = -m21 * m32 * m43
+		+ m21 * m42 * m33
+		+ m22 * m31 * m43
+		- m22 * m41 * m33
+		- m23 * m31 * m42
+		+ m23 * m41 * m32;
+	inverse[7] =m11 * m32 * m43
+		-m11 * m42 * m33
+		- m12 * m31 * m43
+		+ m12 * m41 * m33
+		+ m13 * m31 * m42
+		- m13 * m41 * m32;
+	inverse[11] = -m11 * m22 * m43
+		+m11 * m42 * m23
+		+ m12 * m21 * m43
+		- m12 * m41 * m23
+		- m13 * m21 * m42
+		+ m13 * m41 * m22;
+	inverse[15] =m11 * m22 * m33
+		-m11 * m32 * m23
+		- m12 * m21 * m33
+		+ m12 * m31 * m23
+		+ m13 * m21 * m32
+		- m13 * m31 * m22;
+	inverted_determinant = (1.0) / (m11 * inverse[0] + m21 * inverse[4] + m31 * inverse[8] + m41 * inverse[12]);
+	result[0] = inverse[0] * inverted_determinant;
+	result[1] = inverse[1] * inverted_determinant;
+	result[2] = inverse[2] * inverted_determinant;
+	result[3] = inverse[3] * inverted_determinant;
+	result[4] = inverse[4] * inverted_determinant;
+	result[5] = inverse[5] * inverted_determinant;
+	result[6] = inverse[6] * inverted_determinant;
+	result[7] = inverse[7] * inverted_determinant;
+	result[8] = inverse[8] * inverted_determinant;
+	result[9] = inverse[9] * inverted_determinant;
+	result[10] = inverse[10] * inverted_determinant;
+	result[11] = inverse[11] * inverted_determinant;
+	result[12] = inverse[12] * inverted_determinant;
+	result[13] = inverse[13] * inverted_determinant;
+	result[14] = inverse[14] * inverted_determinant;
+	result[15] = inverse[15] * inverted_determinant;
 }
 
 void matrix_proj_opengl(float *proj, float left, float right, float up, float down, float near, float far) {
         assert(near < far);
-	const float tanAngleLeft = tan(left);
-	const float tanAngleRight = tan(right);
-	const float tanAngleDown = tan(up);
-	const float tanAngleUp = tan(down);
 
-	const float tanAngleWidth = tanAngleRight - tanAngleLeft;
-	const float tanAngleHeight = (tanAngleUp - tanAngleDown);
-	const float offset = near;
+        const float tan_left = tan(left);
+        const float tan_right = tan(right);
 
-        proj[0] = 2 / tanAngleWidth;
+        const float tan_down = tan(down);
+        const float tan_up = tan(up);
+
+        const float tan_width = tan_right - tan_left;
+        const float tan_height = (tan_up - tan_down);
+
+        const float offset = near;
+
+        proj[0] = 2 / tan_width;
         proj[4] = 0;
-        proj[8] = (tanAngleRight + tanAngleLeft) / tanAngleWidth;
+        proj[8] = (tan_right + tan_left) / tan_width;
         proj[12] = 0;
 
         proj[1] = 0;
-        proj[5] = 2 / tanAngleHeight;
-        proj[9] = (tanAngleUp + tanAngleDown) / tanAngleHeight;
+        proj[5] = 2 / tan_height;
+        proj[9] = (tan_up + tan_down) / tan_height;
         proj[13] = 0;
 
         proj[2] = 0;
@@ -222,6 +346,42 @@ void matrix_proj_opengl(float *proj, float left, float right, float up, float do
         proj[7] = 0;
         proj[11] = -1;
         proj[15] = 0;
+}
+
+void matrix_multiply(float *result, float *m0, float *m1) {
+	float multiplied[16];
+	multiplied[0] = m0[0] * m1[0] + m0[4] * m1[1] + m0[8] * m1[2] + m0[12] * m1[3];
+	multiplied[1] = m0[1] * m1[0] + m0[5] * m1[1] + m0[9] * m1[2] + m0[13] * m1[3];
+	multiplied[2] = m0[2] * m1[0] + m0[6] * m1[1] + m0[10] * m1[2] + m0[14] * m1[3];
+	multiplied[3] = m0[3] * m1[0] + m0[7] * m1[1] + m0[11] * m1[2] + m0[15] * m1[3];
+	multiplied[4] = m0[0] * m1[4] + m0[4] * m1[5] + m0[8] * m1[6] + m0[12] * m1[7];
+	multiplied[5] = m0[1] * m1[4] + m0[5] * m1[5] + m0[9] * m1[6] + m0[13] * m1[7];
+	multiplied[6] = m0[2] * m1[4] + m0[6] * m1[5] + m0[10] * m1[6] + m0[14] * m1[7];
+	multiplied[7] = m0[3] * m1[4] + m0[7] * m1[5] + m0[11] * m1[6] + m0[15] * m1[7];
+	multiplied[8] = m0[0] * m1[8] + m0[4] * m1[9] + m0[8] * m1[10] + m0[12] * m1[11];
+	multiplied[9] = m0[1] * m1[8] + m0[5] * m1[9] + m0[9] * m1[10] + m0[13] * m1[11];
+	multiplied[10] = m0[2] * m1[8] + m0[6] * m1[9] + m0[10] * m1[10] + m0[14] * m1[11];
+	multiplied[11] = m0[3] * m1[8] + m0[7] * m1[9] + m0[11] * m1[10] + m0[15] * m1[11];
+	multiplied[12] = m0[0] * m1[12] + m0[4] * m1[13] + m0[8] * m1[14] + m0[12] * m1[15];
+	multiplied[13] = m0[1] * m1[12] + m0[5] * m1[13] + m0[9] * m1[14] + m0[13] * m1[15];
+	multiplied[14] = m0[2] * m1[12] + m0[6] * m1[13] + m0[10] * m1[14] + m0[14] * m1[15];
+	multiplied[15] = m0[3] * m1[12] + m0[7] * m1[13] + m0[11] * m1[14] + m0[15] * m1[15];
+	result[0] = multiplied[0];
+	result[1] = multiplied[1];
+	result[2] = multiplied[2];
+	result[3] = multiplied[3];
+	result[4] = multiplied[4];
+	result[5] = multiplied[5];
+	result[6] = multiplied[6];
+	result[7] = multiplied[7];
+	result[8] = multiplied[8];
+	result[9] = multiplied[9];
+	result[10] = multiplied[10];
+	result[11] = multiplied[11];
+	result[12] = multiplied[12];
+	result[13] = multiplied[13];
+	result[14] = multiplied[14];
+	result[15] = multiplied[15];
 }
 
 extern "C" int __system_property_get(const char *__name, char *__value);
@@ -561,7 +721,7 @@ extern "C" void android_main(android_app *app) {
 	XrReferenceSpaceCreateInfo space_desc;
 	space_desc.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
 	space_desc.next = NULL;
-	space_desc.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+	space_desc.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
 	space_desc.poseInReferenceSpace = identity_pose;
 
         XrSpace xr_stage_space;
@@ -977,8 +1137,10 @@ extern "C" void android_main(android_app *app) {
 
                 // Get controller info
                 XrSpaceLocation hand_locations[2] = { { XR_TYPE_SPACE_LOCATION }, { XR_TYPE_SPACE_LOCATION } };
-		xrLocateSpace(xr_hand_spaces[0], xr_stage_space, frame_state.predictedDisplayTime, &hand_locations[0]);
-                xrLocateSpace(xr_hand_spaces[1], xr_stage_space, frame_state.predictedDisplayTime, &hand_locations[1]);
+		result = xrLocateSpace(xr_hand_spaces[0], xr_stage_space, frame_state.predictedDisplayTime, &hand_locations[0]);
+                assert(XR_SUCCEEDED(result));
+                result = xrLocateSpace(xr_hand_spaces[1], xr_stage_space, frame_state.predictedDisplayTime, &hand_locations[1]);
+                assert(XR_SUCCEEDED(result));
 
 		XrActionStateFloat trigger_states[2] = { { XR_TYPE_ACTION_STATE_FLOAT }, { XR_TYPE_ACTION_STATE_FLOAT } };
 		XrActionStateBoolean trigger_click_states[2] = { { XR_TYPE_ACTION_STATE_BOOLEAN }, { XR_TYPE_ACTION_STATE_BOOLEAN } };
@@ -994,11 +1156,6 @@ extern "C" void android_main(android_app *app) {
 		xrGetActionStateBoolean(xr_session, &action_get_info, &trigger_click_states[0]);
 		action_get_info.subactionPath = xr_hand_paths[1];
 		xrGetActionStateBoolean(xr_session, &action_get_info, &trigger_click_states[1]);
-
-                float hand_left_model[16];
-                float hand_right_model[16];
-                matrix_from_pose(hand_left_model, &hand_locations[0].pose);
-                matrix_from_pose(hand_right_model, &hand_locations[1].pose);
 
                 XrFrameBeginInfo frame_begin;
                 frame_begin.type = XR_TYPE_FRAME_BEGIN_INFO;
@@ -1031,7 +1188,6 @@ extern "C" void android_main(android_app *app) {
                 assert(XR_SUCCEEDED(result));
 
                 XrCompositionLayerProjectionView projection_layer_views[8]{};
-                float view_projection_matrices[8][16];
 
                 for (int i = 0; i < view_count_out; i++) {
                         projection_layer_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
@@ -1043,21 +1199,6 @@ extern "C" void android_main(android_app *app) {
                         projection_layer_views[i].subImage.imageRect.extent.width = xr_swapchain_widths[i];
                         projection_layer_views[i].subImage.imageRect.extent.height = xr_swapchain_heights[i];
                         projection_layer_views[i].subImage.imageArrayIndex = 0;
-
-                        float left = projection_layer_views[i].fov.angleLeft;
-                        float right = projection_layer_views[i].fov.angleRight;
-                        float up = projection_layer_views[i].fov.angleUp;
-                        float down = projection_layer_views[i].fov.angleDown;
-
-                        float proj[16];
-                        matrix_proj_opengl(proj, left, right, up, down, 0.1, 100.0);
-
-                        float inv_view[16];
-                        float view[16];
-                        matrix_from_pose(inv_view, &projection_layer_views[i].pose);
-                        matrix_invert(view, inv_view);
-
-                        matrix_mul(&view_projection_matrices[i][0], proj, view);
                 }
 
                 if (frame_state.shouldRender) {
@@ -1086,17 +1227,62 @@ extern "C" void android_main(android_app *app) {
                                 glClearColor(0.2, 0.2, 0.2, 1);
                                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+                                // Projection
+                                float left = projection_layer_views[v].fov.angleLeft;
+                                float right = projection_layer_views[v].fov.angleRight;
+                                float up = projection_layer_views[v].fov.angleUp;
+                                float down = projection_layer_views[v].fov.angleDown;
+                                float proj[16];
+                                matrix_proj_opengl(proj, left, right, up, down, 0.01, 100.0);
+
+                                // View
+                                float translation[16];
+                                matrix_identity(translation);
+                                matrix_translate(translation, translation, (float *)&projection_layer_views[v].pose.position);
+
+                                float rotation[16];
+                                matrix_rotation_from_quat(rotation, (float *)&projection_layer_views[v].pose.orientation);
+
+                                float view[16];
+                                matrix_multiply(view, translation, rotation);
+                                matrix_inverse(view, view);
+
+                                // View Proj
+                                float view_proj[16];
+                                matrix_multiply(view_proj, proj, view);
+
+                                // Left Model
+                                float left_translation[16];
+                                matrix_identity(left_translation);
+                                matrix_translate(left_translation, left_translation, (float *)&hand_locations[0].pose.position);
+
+                                float left_rotation[16];
+                                matrix_rotation_from_quat(left_rotation, (float *)&hand_locations[0].pose.orientation);
+
+                                float left_model[16];
+                                matrix_multiply(left_model, left_translation, left_rotation);
+
+                                // Right Model
+                                float right_translation[16];
+                                matrix_identity(right_translation);
+                                matrix_translate(right_translation, right_translation, (float *)&hand_locations[1].pose.position);
+
+                                float right_rotation[16];
+                                matrix_rotation_from_quat(right_rotation, (float *)&hand_locations[1].pose.orientation);
+
+                                float right_model[16];
+                                matrix_multiply(right_model, right_translation, right_rotation);
+
                                 // Render Left Hand
                                 float left_mvp[16];
-                                matrix_mul(left_mvp, view_projection_matrices[v], hand_left_model);
+                                matrix_multiply(left_mvp, view_proj, left_model);
                                 glUseProgram(shader_prog);
-                                // glUniformMatrix4fv(0, 1, GL_FALSE, left_mvp);
-                                glUniformMatrix4fv(0, 1, GL_FALSE, view_projection_matrices[v]);
+                                glUniformMatrix4fv(0, 1, GL_FALSE, left_mvp);
                                 glDrawArrays(GL_TRIANGLES, 0, 36);
 
                                 // Render Right Hand
                                 float right_mvp[16];
-                                matrix_mul(right_mvp, view_projection_matrices[v], hand_right_model);
+                                matrix_multiply(right_mvp, view_proj, right_model);
                                 glUseProgram(shader_prog);
                                 glUniformMatrix4fv(0, 1, GL_FALSE, right_mvp);
                                 glDrawArrays(GL_TRIANGLES, 0, 36);

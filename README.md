@@ -10,6 +10,9 @@ Just invocations of the C/C++ compiler and build tools that ship with the Androi
 I also thoroughly document the provenance of every vendored and hidden dependency, so that you
 should be able to recreate the repo from scratch yourself. 
 
+This repo is inspired by the work of `cnlohr` on [`tsopenxr`](https://github.com/cnlohr/tsopenxr). Much of the code
+here is based on that example of how to build a Quest 2 apk just using the plain command line tools.
+
 ## How to Build
 
 The build process depends on the following executables:
@@ -89,7 +92,7 @@ adb devices
 adb install -r questxrexample.apk
 
 # Run the apk
-adb shell am start -n org.cshenton.questxrexample/android.app.NativeActivity && adb logcat >> logs.txt
+adb shell am start -n org.cshenton.questxrexample/android.app.NativeActivity && adb logcat OpenXR:D questxrexample:D *:S -v color
 ```
 
 ### A list of commands... that's basically just a rubbish build system!
@@ -110,6 +113,8 @@ is that you need to change the string `cshenton` to your org name and `questxrex
   - `-o build/lib/arm64-v8a/libquestxrexample.so`
 - The adb command
   - `adb shell am start -n org.cshenton.questxrexample/android.app.NativeActivity && adb logcat >> logs.txt`
+
+
 ## Vendor Provenance
 
 Okay, but where did the vendored dependencies come from?

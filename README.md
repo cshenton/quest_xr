@@ -8,10 +8,25 @@ This is a minimal repo to build an application for Quest 2 (Android, OpenXR) usi
 
 Just invocations of the C/C++ compiler and build tools that ship with the Android NDK.
 I also thoroughly document the provenance of every vendored and hidden dependency, so that you
-should be able to recreate the repo from scratch yourself. 
+should be able to recreate the repo from scratch yourself.
+
+All the significant source code is in a single C++ file `src/main.cpp`.
 
 This repo is inspired by the work of `cnlohr` on [`tsopenxr`](https://github.com/cnlohr/tsopenxr). Much of the code
 here is based on that example of how to build a Quest 2 apk just using the plain command line tools.
+
+## Why?
+
+I had a really rubbish time following the official docs for building native Quest Apps. They tell you to do things
+that are incorrect, assume you're happy using a Java build system for your native game engine, and just generally
+don't set you up for success in an ongoing project.
+
+I wanted something that I could use, and point others to, as a good starting point to get a native Quest 2 apk
+built from source with just C++, no Java build system, no accursed python code to generate the OpenXR headers,
+no needless C++ abstractions between you and the OpenXR API calls that you need to learn.
+
+This repo is C++, because that's the most common game engine language, but it is trivially portable to C 
+(remove the `extern "C"` declarations and fix up the raw shaders strings, typedef the `app_t` struct).
 
 ## How to Build
 

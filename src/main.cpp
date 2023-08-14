@@ -32,12 +32,56 @@
 // SHADER SOURCE STRINGS
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+const char *BACKGROUND_VERT_SRC = R"glsl(
+#version 320 es
+precision highp float;
+
+layout(location = 0) uniform mat4 view_proj;
+
+layout(location = 0) out vec3 world_pos;
+
+void main() {
+        const vec2 positions[3] = vec2[3](vec2(-1000,-1000), vec2(3000,-1000), vec2(-1000, 3000));
+        vec2 pos = positions[gl_VertexID];
+        world_pos = vec3(pos.x, 0.0, pos.y);
+        gl_Position = view_proj * vec4(world_pos, 1.0);
+}
+)glsl";
+
+const char *BACKGROUND_FRAG_SRC = R"glsl(
+#version 320 es
+precision highp float;
+
+layout(location = 1) uniform vec3 cam_pos;
+
+layout(location = 0) in vec3 world_pos;
+layout(location = 0) out vec4 out_color;
+
+#define TILE_SIZE 1.0
+#define LINE_WIDTH 0.1
+
+void main() {
+        // Based on the work of Evan Wallace: https://madebyevan.com/shaders/grid/
+        vec3 cam_to_point = world_pos - cam_pos;
+        float dist_sq = max(0.000001, (dot(cam_to_point, cam_to_point)));
+        float fog_alpha = 1.0 / exp(0.005 * dist_sq);
+        vec2 coord = world_pos.xz;
+        vec2 grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+        float line = min(grid.x, grid.y);
+        float color = 1.0 - min(line, 1.0);
+        color = mix(color, 0.4, 1.0 - fog_alpha);
+        vec3 col = mix(vec3(0.0), vec3(1.0, 1.0, 2.0), color);
+        out_color = vec4(col, 1.0);
+}
+)glsl";
+
 const char *BOX_VERT_SRC = R"glsl(
 #version 320 es
 precision highp float;
 
 layout(location = 0) uniform mat4 mvp;
-layout(location = 0) out vec4 vc;
+layout(location = 1) uniform vec2 trigger_state;
+layout(location = 0) out vec3 vc;
 
 void main() {
         const vec3 cube_positions[8] = vec3[8](
@@ -62,31 +106,31 @@ void main() {
 
         int index = clamp(gl_VertexID, 0, 35);
         int element = clamp(cube_indices[index], 0, 7);
-        vec3 pos = cube_positions[element];
+        float t = -(cos(3.14159 * trigger_state.x) - 1.0) / 2.0; // Ease
+        vec3 pos = vec3(mix(1.0, 1.2, t)) * cube_positions[element];
 
         gl_Position = vec4(mvp * vec4(pos, 1.0));
-        vc = vec4(1, 0, 1, 1);
+        vc = mix(vec3(0, 0, 1), vec3(1, 0, 0), trigger_state.x);
 }
 )glsl";
 
 
-// Fragement Shader Program
 const char *BOX_FRAG_SRC = R"glsl(
 #version 320 es
 precision highp float;
 
-layout(location = 0) in vec4 vc;
+layout(location = 0) in vec3 vc;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-        outColor = vc;
+        outColor = vec4(vc, 1.0);
 }
 )glsl";
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // MATRIX HELPERS
 //
-// Based on the code in https://github.com/felselva/mathc
+// Based on code from https://github.com/felselva/mathc
 // Copyright © 2018 Felipe Ferreira da Silva
 // https://github.com/felselva/mathc/blob/master/LICENSE
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -306,6 +350,9 @@ struct app_t {
         XrInstance instance;
         XrSystemId system;
         XrSession session;
+
+        // Views
+        uint32_t view_count;
         XrViewConfigurationView view_configs[MAX_VIEWS];
 
         // Spaces
@@ -339,12 +386,8 @@ struct app_t {
 
         // OpenGL state
         uint32_t box_program;
-
-        // Framebuffer info
-        uint32_t view_count;
-        uint32_t blit_framebuffer;
-        uint32_t framebuffers[MAX_VIEWS];
-        uint32_t colour_targets[MAX_VIEWS];
+        uint32_t background_program;
+        uint32_t framebuffer;
         uint32_t depth_targets[MAX_VIEWS];
 
         // Current Controller Inputs
@@ -818,6 +861,7 @@ void app_init_xr_create_actions(app_t *a) {
         assert(XR_SUCCEEDED(result));
 }
 
+// Choose a swapchain format, and create a swapchain per view
 void app_init_xr_create_swapchains(app_t *a) {
         XrResult result;
 
@@ -879,36 +923,26 @@ void app_init_xr_create_swapchains(app_t *a) {
         }
 }
 
+// Create a framebuffer, and a depth buffer per view
 void app_init_opengl_framebuffers(app_t *a) {
-        glGenFramebuffers(1, &a->blit_framebuffer);
+        glGenFramebuffers(1, &a->framebuffer);
 
         for (int i=0; i < a->view_count; i++) {
                 int width = a->swapchain_widths[i];
                 int height = a->swapchain_heights[i];
 
-                glGenFramebuffers(1, &a->framebuffers[i]);
-                glBindFramebuffer(GL_FRAMEBUFFER, a->framebuffers[i]);
-
-                glGenTextures(1, &a->colour_targets[i]);
-                glBindTexture(GL_TEXTURE_2D, a->colour_targets[i]);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a->colour_targets[i], 0);
-
                 glGenTextures(1, &a->depth_targets[i]);
                 glBindTexture(GL_TEXTURE_2D, a->depth_targets[i]);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, a->depth_targets[i], 0);
-
-                uint32_t draw_bufs[1] = {GL_COLOR_ATTACHMENT0};
-                glDrawBuffers(1, draw_bufs);
-
-                assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
         }
 }
 
+// Compile the OpenGL shaders into programs
 void app_init_opengl_shaders(app_t *a) {
+        glEnable(GL_DEPTH_TEST);  
+
+        // Box Program
         uint32_t vert_shd = glCreateShader(GL_VERTEX_SHADER);
         glShaderSource(vert_shd, 1, &BOX_VERT_SRC, NULL);
         glCompileShader(vert_shd);
@@ -946,8 +980,47 @@ void app_init_opengl_shaders(app_t *a) {
 
         glDeleteShader(vert_shd);
         glDeleteShader(frag_shd);
+
+        // Background Program
+        vert_shd = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vert_shd, 1, &BACKGROUND_VERT_SRC, NULL);
+        glCompileShader(vert_shd);
+
+        glGetShaderiv(vert_shd, GL_COMPILE_STATUS, &success);
+        if (!success) {
+                char info_log[512];
+                glGetShaderInfoLog(vert_shd, 512, NULL, info_log);
+                printf("Vertex shader compilation failed:\n %s\n", info_log);
+        }
+
+        frag_shd = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(frag_shd, 1, &BACKGROUND_FRAG_SRC, NULL);
+        glCompileShader(frag_shd);
+
+        glGetShaderiv(frag_shd, GL_COMPILE_STATUS, &success);
+        if (!success) {
+                char info_log[512];
+                glGetShaderInfoLog(frag_shd, 512, NULL, info_log);
+                printf("Fragment shader compilation failed:\n %s\n", info_log);
+        }
+
+        a->background_program = glCreateProgram();
+        glAttachShader(a->background_program, vert_shd);
+        glAttachShader(a->background_program, frag_shd);
+        glLinkProgram(a->background_program);
+
+        glGetProgramiv(a->background_program, GL_LINK_STATUS, &success);
+        if (!success) {
+                char info_log[512];
+                glGetProgramInfoLog(a->background_program, 512, NULL, info_log);
+                printf("Program Linking failed:\n %s\n", info_log);
+        }
+
+        glDeleteShader(vert_shd);
+        glDeleteShader(frag_shd);
 }
 
+// Initialises the application state
 void app_init(app_t *a, android_app *app) {
         app_set_callbacks_and_wait(a, app);
         app_init_egl(a);
@@ -966,6 +1039,7 @@ void app_init(app_t *a, android_app *app) {
 // UPDATE LOOP
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Begin the OpenXR session
 void app_update_begin_session(app_t *a) {
         printf("Beginning Session");
         XrSessionBeginInfo begin_desc;
@@ -978,6 +1052,7 @@ void app_update_begin_session(app_t *a) {
         a->is_session_ready = true;
 }
 
+// Handle session state changes
 void app_update_session_state_change(app_t *a, XrSessionState state) {
         a->session_state = state;
         switch (a->session_state) {
@@ -1012,6 +1087,7 @@ void app_update_session_state_change(app_t *a, XrSessionState state) {
         }
 }
 
+// Pump the android and OpenXR event loops
 void app_update_pump_events(app_t *a) {
         // Pump Android Event Loop
         int events;
@@ -1062,6 +1138,7 @@ void app_update_pump_events(app_t *a) {
         }
 }
 
+// Wait for the next frame, and get the transforms and button inputs of the controllers
 void app_update_begin_frame_and_get_inputs(app_t *a) {
         XrResult result;
 
@@ -1120,6 +1197,7 @@ void app_update_begin_frame_and_get_inputs(app_t *a) {
         assert(XR_SUCCEEDED(result));
 }
 
+// Locate the views, and render into the swapchains
 void app_update_render(app_t *a) {
         XrResult result;
 
@@ -1172,14 +1250,6 @@ void app_update_render(app_t *a) {
                 int width = a->projection_layer_views[v].subImage.imageRect.extent.width;
                 int height = a->projection_layer_views[v].subImage.imageRect.extent.height;
 
-                // Render to the swapchain directly
-                glBindFramebuffer(GL_FRAMEBUFFER, a->blit_framebuffer);
-                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colour_tex, 0);
-                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, a->depth_targets[v], 0);
-                glViewport(0, 0, width, height);
-                glClearColor(0.2, 0.2, 0.2, 1);
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
                 // Projection
                 float left = a->projection_layer_views[v].fov.angleLeft;
                 float right = a->projection_layer_views[v].fov.angleRight;
@@ -1188,56 +1258,66 @@ void app_update_render(app_t *a) {
                 float proj[16];
                 matrix_proj_opengl(proj, left, right, up, down, 0.01, 100.0);
 
-                // View
+                // View, View Projection
                 float translation[16];
+                float rotation[16];
+                float view[16];
+                float view_proj[16];
+                float inverse_view_proj[16];
                 matrix_identity(translation);
                 matrix_translate(translation, translation, (float *)&a->projection_layer_views[v].pose.position);
-
-                float rotation[16];
                 matrix_rotation_from_quat(rotation, (float *)&a->projection_layer_views[v].pose.orientation);
-
-                float view[16];
                 matrix_multiply(view, translation, rotation);
                 matrix_inverse(view, view);
-
-                // View Proj
-                float view_proj[16];
                 matrix_multiply(view_proj, proj, view);
+                matrix_inverse(inverse_view_proj, view_proj);
 
-                // Left Model
+                // Left MVP
                 float left_translation[16];
+                float left_rotation[16];
+                float left_model[16];
+                float left_mvp[16];
                 matrix_identity(left_translation);
                 matrix_translate(left_translation, left_translation, (float *)&a->hand_locations[0].pose.position);
-
-                float left_rotation[16];
                 matrix_rotation_from_quat(left_rotation, (float *)&a->hand_locations[0].pose.orientation);
-
-                float left_model[16];
                 matrix_multiply(left_model, left_translation, left_rotation);
+                matrix_multiply(left_mvp, view_proj, left_model);
 
                 // Right Model
                 float right_translation[16];
+                float right_rotation[16];
+                float right_model[16];
+                float right_mvp[16];
                 matrix_identity(right_translation);
                 matrix_translate(right_translation, right_translation, (float *)&a->hand_locations[1].pose.position);
-
-                float right_rotation[16];
                 matrix_rotation_from_quat(right_rotation, (float *)&a->hand_locations[1].pose.orientation);
-
-                float right_model[16];
                 matrix_multiply(right_model, right_translation, right_rotation);
+                matrix_multiply(right_mvp, view_proj, right_model);
+        
+                // Render into the swapchain directly
+                glBindFramebuffer(GL_FRAMEBUFFER, a->framebuffer);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colour_tex, 0);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, a->depth_targets[v], 0);
+                glViewport(0, 0, width, height);
+                glClearColor(0.4, 0.4, 0.8, 1);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+                // Render Background
+                glUseProgram(a->background_program);
+                glUniformMatrix4fv(0, 1, GL_FALSE, view_proj);
+                glUniform3fv(1, 1, (float *)&a->hand_locations[0].pose.position);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
 
                 // Render Left Hand
-                float left_mvp[16];
-                matrix_multiply(left_mvp, view_proj, left_model);
                 glUseProgram(a->box_program);
                 glUniformMatrix4fv(0, 1, GL_FALSE, left_mvp);
+                glUniform2f(1, a->trigger_states[0].currentState, (float)(a->trigger_click_states[0].currentState));
                 glDrawArrays(GL_TRIANGLES, 0, 36);
 
                 // Render Right Hand
-                float right_mvp[16];
-                matrix_multiply(right_mvp, view_proj, right_model);
                 glUseProgram(a->box_program);
                 glUniformMatrix4fv(0, 1, GL_FALSE, right_mvp);
+                glUniform2f(1, a->trigger_states[1].currentState, (float)(a->trigger_click_states[1].currentState));
                 glDrawArrays(GL_TRIANGLES, 0, 36);
 
                 // Release Image
@@ -1250,6 +1330,7 @@ void app_update_render(app_t *a) {
         a->projection_layer.views = &a->projection_layer_views[0];
 }
 
+// Submit the frame
 void app_update_end_frame(app_t *a) {
         const XrCompositionLayerBaseHeader * layers[1] = { (XrCompositionLayerBaseHeader *)&a->projection_layer };
         XrFrameEndInfo frame_end = { XR_TYPE_FRAME_END_INFO };
@@ -1262,6 +1343,7 @@ void app_update_end_frame(app_t *a) {
         assert(XR_SUCCEEDED(result));
 }
 
+// Update the application while it is running
 void app_update(app_t *a) {
         app_update_pump_events(a);
         if (!a->is_session_ready) { return; }
@@ -1276,6 +1358,7 @@ void app_update(app_t *a) {
 // SHUTDOWN
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Clean up the OpenXR handles
 void app_shutdown(app_t *a) {
         XrResult result;
 
@@ -1304,6 +1387,7 @@ void app_shutdown(app_t *a) {
 // ENTRY POINT
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Entrypoint called by the OS when using native activity
 extern "C" void android_main(android_app *app) {
         app_t a{};
         app_init(&a, app);

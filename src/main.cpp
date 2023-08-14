@@ -432,13 +432,24 @@ extern "C" void app_android_handle_cmd(android_app *app, int32_t cmd) {
                         // TODO: Handle Resume
                 }
                 break;
-                //case APP_CMD_TERM_WINDOW:
-                        //This gets called initially when you click "back"
-                        //This also gets called when you are brought into standby.
-                        //Not sure why - callbacks here seem to break stuff.
-                //	break;
+        case APP_CMD_TERM_WINDOW:
+                // Turns up when focus is lost
+                // Seems like the main loop just xrWaitFrame hitches
+        	break;
+        case APP_CMD_SAVE_STATE:
+                printf("Saving application state\n");
+                app->savedState = malloc(sizeof(app_t));
+                memcpy(app->savedState, a, sizeof(app_t));
+                app->savedStateSize = sizeof(app_t);
+                break;
+        case APP_CMD_RESUME:
+                // Nope, that doesn't work
+                // printf("Resumed, loading state\n");
+                // memcpy(a, app->savedState, sizeof(app_t));
+                break;
+        // TODO: APP_CMD_SAVE_STATE
         default:
-                printf("event not handled: %d", cmd);
+                printf("event not handled: %d\n", cmd);
         }
 }
 
@@ -1361,6 +1372,8 @@ void app_update(app_t *a) {
 // Clean up the OpenXR handles
 void app_shutdown(app_t *a) {
         XrResult result;
+
+        printf("Shutting Down\n");
 
         // Clean up
         for (int i=0; i < a->view_count; i++) {

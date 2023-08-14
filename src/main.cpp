@@ -309,7 +309,7 @@ struct app_t {
         XrViewConfigurationView view_configs[MAX_VIEWS];
 
         // Spaces
-        XrSpace play_space;
+        XrSpace stage_space;
         XrSpace hand_spaces[HAND_COUNT];
 
         // OpenXR paths (interned query strings)
@@ -346,6 +346,24 @@ struct app_t {
         uint32_t framebuffers[MAX_VIEWS];
         uint32_t colour_targets[MAX_VIEWS];
         uint32_t depth_targets[MAX_VIEWS];
+
+        // Current Controller Inputs
+        XrSpaceLocation hand_locations[HAND_COUNT];
+        XrActionStateFloat trigger_states[HAND_COUNT];
+        XrActionStateBoolean trigger_click_states[HAND_COUNT];
+
+        // Session State
+        XrSessionState session_state;
+        XrFrameState frame_state;
+        bool should_render;
+        bool is_running;
+        bool is_session_ready;
+        bool is_session_begin_ever;
+
+        // Frame Submission
+        uint32_t view_submit_count;
+        XrCompositionLayerProjection projection_layer;
+        XrCompositionLayerProjectionView projection_layer_views[MAX_VIEWS];
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -618,7 +636,7 @@ void app_init_xr_create_session(app_t *a) {
 }
 
 // Create the reference space, and print available spaces
-void app_init_xr_create_play_space(app_t *a) {
+void app_init_xr_create_stage_space(app_t *a) {
         XrResult result;
 
         // Create Space
@@ -655,7 +673,7 @@ void app_init_xr_create_play_space(app_t *a) {
 	space_desc.next = NULL;
 	space_desc.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
 	space_desc.poseInReferenceSpace = identity_pose;
-	result = xrCreateReferenceSpace(a->session, &space_desc, &a->play_space);
+	result = xrCreateReferenceSpace(a->session, &space_desc, &a->stage_space);
         assert(XR_SUCCEEDED(result));
 }
 
@@ -806,8 +824,9 @@ void app_init_xr_create_swapchains(app_t *a) {
         // Choose Swapchain Format
         uint32_t swapchain_format_count;
         result = xrEnumerateSwapchainFormats(a->session, 0, &swapchain_format_count, NULL);
-        assert(XR_SUCCEEDED(result) && swapchain_format_count <= 64);
-        int64_t swapchain_formats[64];
+        assert(XR_SUCCEEDED(result));
+        assert(swapchain_format_count <= 128);
+        int64_t swapchain_formats[128];
         result = xrEnumerateSwapchainFormats(a->session, swapchain_format_count, &swapchain_format_count, swapchain_formats);
         assert(XR_SUCCEEDED(result));
         bool is_default = true;
@@ -936,7 +955,7 @@ void app_init(app_t *a, android_app *app) {
         app_init_xr_get_system(a);
         app_init_xr_enum_views(a);
         app_init_xr_create_session(a);
-        app_init_xr_create_play_space(a);
+        app_init_xr_create_stage_space(a);
         app_init_xr_create_actions(a);
         app_init_xr_create_swapchains(a);
         app_init_opengl_framebuffers(a);
@@ -944,33 +963,342 @@ void app_init(app_t *a, android_app *app) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// RENDER LOOP
+// UPDATE LOOP
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void app_update_begin_session(app_t *a) {
+        printf("Beginning Session");
+        XrSessionBeginInfo begin_desc;
+        begin_desc.type = XR_TYPE_SESSION_BEGIN_INFO;
+        begin_desc.next = NULL;
+        begin_desc.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+        XrResult result = xrBeginSession(a->session, &begin_desc);
+        assert(XR_SUCCEEDED(result));
+        a->is_session_begin_ever = true;
+        a->is_session_ready = true;
+}
+
+void app_update_session_state_change(app_t *a, XrSessionState state) {
+        a->session_state = state;
+        switch (a->session_state) {
+        case XR_SESSION_STATE_IDLE:
+                printf("XR_SESSION_STATE_IDLE\n");
+                break;
+        case XR_SESSION_STATE_READY:
+                printf("XR_SESSION_STATE_READY\n");
+                app_update_begin_session(a);
+                break;
+        case XR_SESSION_STATE_SYNCHRONIZED:
+                printf("XR_SESSION_STATE_SYNCHRONIZED\n");
+                break;
+        case XR_SESSION_STATE_VISIBLE:
+                printf("XR_SESSION_STATE_VISIBLE\n");
+                break;
+        case XR_SESSION_STATE_FOCUSED:
+                printf("XR_SESSION_STATE_FOCUSED\n");
+                break;
+        case XR_SESSION_STATE_STOPPING:
+                printf("XR_SESSION_STATE_STOPPING\n");
+                break;
+        case XR_SESSION_STATE_LOSS_PENDING:
+                printf("XR_SESSION_STATE_LOSS_PENDING\n");
+                break;
+        case XR_SESSION_STATE_EXITING:
+                printf("XR_SESSION_STATE_EXITING\n");
+                break;
+        default:
+                printf("XR_SESSION_STATE_??? %d\n", (int)a->session_state);
+                break;
+        }
+}
+
+void app_update_pump_events(app_t *a) {
+        // Pump Android Event Loop
+        int events;
+        struct android_poll_source *source;
+        while (ALooper_pollAll(0, 0, &events, (void **)&source) >= 0 ) {
+                if (source != NULL) {
+                        source->process(a->app, source );
+                }
+        }
+
+        // Pump OpenXR Event Loop
+        bool is_remaining_events = true;
+        while (is_remaining_events) {
+                XrEventDataBuffer event_data = { XR_TYPE_EVENT_DATA_BUFFER };
+                XrResult result = xrPollEvent(a->instance, &event_data);
+                if (result != XR_SUCCESS) {
+                        is_remaining_events = false;
+                        continue;
+                }
+
+                switch (event_data.type) {
+                case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
+                        printf("Event: XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING\n");
+                        // TODO: Handle, or prefer to handle loss pending in session state?
+                        break;
+                case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED: {
+                        printf("Event: XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED -> ");
+                        XrEventDataSessionStateChanged* ssc = (XrEventDataSessionStateChanged*)&event_data;
+                        app_update_session_state_change(a, ssc->state);
+                        break;
+                }
+                case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
+                        printf("Event: XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING\n");
+                        // TODO: Handle Reference Spaces changes
+                        break;
+                case XR_TYPE_EVENT_DATA_EVENTS_LOST:
+                        printf("Event: XR_TYPE_EVENT_DATA_EVENTS_LOST\n");
+                        // TODO: print warning
+                        break;
+                case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
+                        printf("Event: XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED\n");
+                        // TODO: this shouldn't happen but handle
+                        break;
+                default:
+                        printf("Event: Unhandled event type %d\n", event_data.type);
+                        break;
+                }
+        }
+}
+
+void app_update_begin_frame_and_get_inputs(app_t *a) {
+        XrResult result;
+
+        // Sync Input
+        XrActiveActionSet active_action_set;
+        active_action_set.actionSet = a->action_set;
+        active_action_set.subactionPath = XR_NULL_PATH;
+        XrActionsSyncInfo action_sync_info;
+        action_sync_info.type = XR_TYPE_ACTIONS_SYNC_INFO;
+        action_sync_info.next = NULL;
+        action_sync_info.countActiveActionSets = 1;
+        action_sync_info.activeActionSets = &active_action_set;
+        result = xrSyncActions(a->session, &action_sync_info);
+        assert(XR_SUCCEEDED(result));
+
+        // Wait Frame
+        a->frame_state.type = XR_TYPE_FRAME_STATE;
+        a->frame_state.next = NULL;
+        XrFrameWaitInfo frame_wait;
+        frame_wait.type = XR_TYPE_FRAME_WAIT_INFO;
+        frame_wait.next = NULL;
+        result = xrWaitFrame(a->session, &frame_wait, &a->frame_state);
+        assert(XR_SUCCEEDED(result));
+        a->should_render = a->frame_state.shouldRender;
+
+        // TODO: Different code paths for focussed vs. not focussed
+
+        // Get Action States and Spaces (i.e. current state of the controller inputs)
+        for (int i=0; i < HAND_COUNT; i++) {
+                a->hand_locations[i].type = XR_TYPE_SPACE_LOCATION;
+                a->trigger_states[i].type = XR_TYPE_ACTION_STATE_FLOAT;
+                a->trigger_click_states[i].type = XR_TYPE_ACTION_STATE_BOOLEAN;
+        }
+
+        result = xrLocateSpace(a->hand_spaces[0], a->stage_space, a->frame_state.predictedDisplayTime, &a->hand_locations[0]);
+        assert(XR_SUCCEEDED(result));
+        result = xrLocateSpace(a->hand_spaces[1], a->stage_space, a->frame_state.predictedDisplayTime, &a->hand_locations[1]);
+        assert(XR_SUCCEEDED(result));
+
+        XrActionStateGetInfo action_get_info = { XR_TYPE_ACTION_STATE_GET_INFO };
+        action_get_info.action = a->trigger_action;
+        action_get_info.subactionPath = a->hand_paths[0];
+        xrGetActionStateFloat(a->session, &action_get_info, &a->trigger_states[0]);
+        action_get_info.subactionPath = a->hand_paths[1];
+        xrGetActionStateFloat(a->session, &action_get_info, &a->trigger_states[1]);
+        action_get_info.action = a->trigger_click_action;
+        action_get_info.subactionPath = a->hand_paths[0];
+        xrGetActionStateBoolean(a->session, &action_get_info, &a->trigger_click_states[0]);
+        action_get_info.subactionPath = a->hand_paths[1];
+        xrGetActionStateBoolean(a->session, &action_get_info, &a->trigger_click_states[1]);
+
+        XrFrameBeginInfo frame_begin;
+        frame_begin.type = XR_TYPE_FRAME_BEGIN_INFO;
+        frame_begin.next = NULL;
+        result = xrBeginFrame(a->session, &frame_begin);
+        assert(XR_SUCCEEDED(result));
+}
+
+void app_update_render(app_t *a) {
+        XrResult result;
+
+        // Reset Composition Layer
+        a->projection_layer = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
+        a->projection_layer.layerFlags = 0;
+        a->projection_layer.next = NULL;
+        a->projection_layer.space = a->stage_space;
+
+        // Locate Views
+        XrView views[MAX_VIEWS];
+        for (int i=0; i < a->view_count; i++) {
+                views[i].type = XR_TYPE_VIEW;
+                views[i].next = NULL;
+        }
+        XrViewState view_state = { XR_TYPE_VIEW_STATE };
+        XrViewLocateInfo view_locate_info;
+        view_locate_info.type = XR_TYPE_VIEW_LOCATE_INFO;
+        view_locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+        view_locate_info.displayTime = a->frame_state.predictedDisplayTime;
+        view_locate_info.space = a->stage_space;
+        result = xrLocateViews(a->session, &view_locate_info, &view_state, a->view_count, &a->view_submit_count, views);
+        assert(XR_SUCCEEDED(result));
+
+        // Fill in Projection Views info
+        for (int i = 0; i < a->view_submit_count; i++) {
+                a->projection_layer_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+                a->projection_layer_views[i].pose = views[i].pose;
+                a->projection_layer_views[i].fov = views[i].fov;
+                a->projection_layer_views[i].subImage.swapchain = a->swapchains[i];
+                a->projection_layer_views[i].subImage.imageRect.offset.x = 0;
+                a->projection_layer_views[i].subImage.imageRect.offset.y = 0;
+                a->projection_layer_views[i].subImage.imageRect.extent.width = a->swapchain_widths[i];
+                a->projection_layer_views[i].subImage.imageRect.extent.height = a->swapchain_heights[i];
+                a->projection_layer_views[i].subImage.imageArrayIndex = 0;
+        }
+
+        for (int v = 0; v < a->view_submit_count; v++) {
+                // Acquire and wait for the swapchain image
+                uint32_t image_index;
+                XrSwapchainImageAcquireInfo acquire_info = { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+                result = xrAcquireSwapchainImage(a->swapchains[v], &acquire_info, &image_index);
+                assert(XR_SUCCEEDED(result));
+                XrSwapchainImageWaitInfo wait_info = { XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
+                wait_info.timeout = XR_INFINITE_DURATION;
+                result = xrWaitSwapchainImage(a->swapchains[v], &wait_info);
+                assert(XR_SUCCEEDED(result));
+                XrSwapchainImageOpenGLESKHR swapchain_image = a->swapchain_images[v][image_index];
+                uint32_t colour_tex = swapchain_image.image;
+                int width = a->projection_layer_views[v].subImage.imageRect.extent.width;
+                int height = a->projection_layer_views[v].subImage.imageRect.extent.height;
+
+                // Render to the swapchain directly
+                glBindFramebuffer(GL_FRAMEBUFFER, a->blit_framebuffer);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colour_tex, 0);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, a->depth_targets[v], 0);
+                glViewport(0, 0, width, height);
+                glClearColor(0.2, 0.2, 0.2, 1);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+                // Projection
+                float left = a->projection_layer_views[v].fov.angleLeft;
+                float right = a->projection_layer_views[v].fov.angleRight;
+                float up = a->projection_layer_views[v].fov.angleUp;
+                float down = a->projection_layer_views[v].fov.angleDown;
+                float proj[16];
+                matrix_proj_opengl(proj, left, right, up, down, 0.01, 100.0);
+
+                // View
+                float translation[16];
+                matrix_identity(translation);
+                matrix_translate(translation, translation, (float *)&a->projection_layer_views[v].pose.position);
+
+                float rotation[16];
+                matrix_rotation_from_quat(rotation, (float *)&a->projection_layer_views[v].pose.orientation);
+
+                float view[16];
+                matrix_multiply(view, translation, rotation);
+                matrix_inverse(view, view);
+
+                // View Proj
+                float view_proj[16];
+                matrix_multiply(view_proj, proj, view);
+
+                // Left Model
+                float left_translation[16];
+                matrix_identity(left_translation);
+                matrix_translate(left_translation, left_translation, (float *)&a->hand_locations[0].pose.position);
+
+                float left_rotation[16];
+                matrix_rotation_from_quat(left_rotation, (float *)&a->hand_locations[0].pose.orientation);
+
+                float left_model[16];
+                matrix_multiply(left_model, left_translation, left_rotation);
+
+                // Right Model
+                float right_translation[16];
+                matrix_identity(right_translation);
+                matrix_translate(right_translation, right_translation, (float *)&a->hand_locations[1].pose.position);
+
+                float right_rotation[16];
+                matrix_rotation_from_quat(right_rotation, (float *)&a->hand_locations[1].pose.orientation);
+
+                float right_model[16];
+                matrix_multiply(right_model, right_translation, right_rotation);
+
+                // Render Left Hand
+                float left_mvp[16];
+                matrix_multiply(left_mvp, view_proj, left_model);
+                glUseProgram(a->box_program);
+                glUniformMatrix4fv(0, 1, GL_FALSE, left_mvp);
+                glDrawArrays(GL_TRIANGLES, 0, 36);
+
+                // Render Right Hand
+                float right_mvp[16];
+                matrix_multiply(right_mvp, view_proj, right_model);
+                glUseProgram(a->box_program);
+                glUniformMatrix4fv(0, 1, GL_FALSE, right_mvp);
+                glDrawArrays(GL_TRIANGLES, 0, 36);
+
+                // Release Image
+                XrSwapchainImageReleaseInfo release_info = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+                result = xrReleaseSwapchainImage(a->swapchains[v], &release_info);
+                assert(XR_SUCCEEDED(result));
+        }
+
+        a->projection_layer.viewCount = a->view_submit_count;
+        a->projection_layer.views = &a->projection_layer_views[0];
+}
+
+void app_update_end_frame(app_t *a) {
+        const XrCompositionLayerBaseHeader * layers[1] = { (XrCompositionLayerBaseHeader *)&a->projection_layer };
+        XrFrameEndInfo frame_end = { XR_TYPE_FRAME_END_INFO };
+        frame_end.displayTime = a->frame_state.predictedDisplayTime;
+        frame_end.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+        frame_end.layerCount = a->should_render ? 1 : 0;
+        frame_end.layers = a->should_render ? layers : NULL;
+
+        XrResult result = xrEndFrame(a->session, &frame_end);
+        assert(XR_SUCCEEDED(result));
+}
+
+void app_update(app_t *a) {
+        app_update_pump_events(a);
+        if (!a->is_session_ready) { return; }
+        app_update_begin_frame_and_get_inputs(a);
+        if (a->should_render) {
+                app_update_render(a);
+        }
+        app_update_end_frame(a);
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SHUTDOWN
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+void app_shutdown(app_t *a) {
+        XrResult result;
 
         // Clean up
-        for (int i=0; i < xr_view_count; i++) {
-                result = xrDestroySwapchain(xr_swapchains[i]);
+        for (int i=0; i < a->view_count; i++) {
+                result = xrDestroySwapchain(a->swapchains[i]);
                 assert(XR_SUCCEEDED(result));
         }
 
-	result = xrDestroySpace(xr_stage_space);
+	result = xrDestroySpace(a->stage_space);
         assert(XR_SUCCEEDED(result));
 
-        if (is_session_begin_ever) {
-                result = xrEndSession(xr_session);
+        if (a->is_session_begin_ever) {
+                result = xrEndSession(a->session);
                 assert(XR_SUCCEEDED(result));
         }
 
-        result = xrDestroySession(xr_session);
+        result = xrDestroySession(a->session);
         assert(XR_SUCCEEDED(result));
 
-	result = xrDestroyInstance(xr_instance);
+	result = xrDestroyInstance(a->instance);
         assert(XR_SUCCEEDED(result));
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // ENTRY POINT
@@ -980,294 +1308,10 @@ extern "C" void android_main(android_app *app) {
         app_t a{};
         app_init(&a, app);
 
-        // Loop State
-        XrSessionState xr_session_state = XR_SESSION_STATE_UNKNOWN;
-        bool is_running = true;
-        bool is_session_ready = false;
-        bool is_session_begin_ever = false;
-
-        // Main Loop
-        while (is_running) {
-                // Pump Android Event Loop
-                int events;
-                struct android_poll_source *source;
-                while (ALooper_pollAll(0, 0, &events, (void **)&source) >= 0 ) {
-                        if (source != NULL) {
-                                source->process( gapp, source );
-                        }
-                }
-
-                // Pump OpenXR Event Loop
-                bool is_remaining_events = true;
-                while (is_remaining_events) {
-                        XrEventDataBuffer xr_event = { XR_TYPE_EVENT_DATA_BUFFER };
-                        XrResult result = xrPollEvent(xr_instance, &xr_event);
-                        if (result != XR_SUCCESS) {
-                                is_remaining_events = false;
-                                continue;
-                        }
-
-                        switch (xr_event.type) {
-                        case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
-                                printf("xr_event: XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING\n");
-                                break;
-                        case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED: {
-                                printf("xr_event: XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED -> ");
-                                XrEventDataSessionStateChanged* ssc = (XrEventDataSessionStateChanged*)&xr_event;
-                                xr_session_state = ssc->state;
-                                switch (xr_session_state) {
-                                case XR_SESSION_STATE_IDLE:
-                                        printf("XR_SESSION_STATE_IDLE\n");
-                                        break;
-                                case XR_SESSION_STATE_READY:
-                                        printf("XR_SESSION_STATE_READY\n");
-                                        XrSessionBeginInfo begin_desc;
-                                        begin_desc.type = XR_TYPE_SESSION_BEGIN_INFO;
-                                        begin_desc.next = NULL;
-                                        begin_desc.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                                        result = xrBeginSession(xr_session, &begin_desc);
-                                        assert(XR_SUCCEEDED(result));
-                                        is_session_begin_ever = true;
-                                        is_session_ready = true;
-                                        break;
-                                case XR_SESSION_STATE_SYNCHRONIZED:
-                                        printf("XR_SESSION_STATE_SYNCHRONIZED\n");
-                                        break;
-                                case XR_SESSION_STATE_VISIBLE:
-                                        printf("XR_SESSION_STATE_VISIBLE\n");
-                                        break;
-                                case XR_SESSION_STATE_FOCUSED:
-                                        printf("XR_SESSION_STATE_FOCUSED\n");
-                                        break;
-                                case XR_SESSION_STATE_STOPPING:
-                                        printf("XR_SESSION_STATE_STOPPING\n");
-                                        break;
-                                case XR_SESSION_STATE_LOSS_PENDING:
-                                        printf("XR_SESSION_STATE_LOSS_PENDING\n");
-                                        break;
-                                case XR_SESSION_STATE_EXITING:
-                                        printf("XR_SESSION_STATE_EXITING\n");
-                                        break;
-                                default:
-                                        printf("XR_SESSION_STATE_??? %d\n", (int)xr_session_state);
-                                        break;
-                                }
-                                break;
-                        }
-                        case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
-                                printf("XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING\n");
-                                break;
-                        case XR_TYPE_EVENT_DATA_EVENTS_LOST:
-                                printf("xr_event: XR_TYPE_EVENT_DATA_EVENTS_LOST\n");
-                                break;
-                        case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
-                                printf("XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED\n");
-                                break;
-                        default:
-                                printf("Unhandled event type %d\n", xr_event.type);
-                                break;
-                        }
-                }
-
-                if (!is_session_ready) { continue; }
-
-                // Sync Input
-                XrActiveActionSet active_action_set;
-                active_action_set.actionSet = xr_action_set;
-                active_action_set.subactionPath = XR_NULL_PATH;
-                XrActionsSyncInfo action_sync_info;
-                action_sync_info.type = XR_TYPE_ACTIONS_SYNC_INFO;
-                action_sync_info.next = NULL;
-                action_sync_info.countActiveActionSets = 1;
-                action_sync_info.activeActionSets = &active_action_set;
-                result = xrSyncActions(xr_session, &action_sync_info);
-                assert(XR_SUCCEEDED(result));
-
-                // Wait Frame
-                XrFrameState frame_state;
-                frame_state.type = XR_TYPE_FRAME_STATE;
-                frame_state.next = NULL;
-
-                XrFrameWaitInfo frame_wait;
-                frame_wait.type = XR_TYPE_FRAME_WAIT_INFO;
-                frame_wait.next = NULL;
-
-                result = xrWaitFrame(xr_session, &frame_wait, &frame_state);
-                assert(XR_SUCCEEDED(result));
-
-                // Get controller info
-                XrSpaceLocation hand_locations[2] = { { XR_TYPE_SPACE_LOCATION }, { XR_TYPE_SPACE_LOCATION } };
-		result = xrLocateSpace(xr_hand_spaces[0], xr_stage_space, frame_state.predictedDisplayTime, &hand_locations[0]);
-                assert(XR_SUCCEEDED(result));
-                result = xrLocateSpace(xr_hand_spaces[1], xr_stage_space, frame_state.predictedDisplayTime, &hand_locations[1]);
-                assert(XR_SUCCEEDED(result));
-
-		XrActionStateFloat trigger_states[2] = { { XR_TYPE_ACTION_STATE_FLOAT }, { XR_TYPE_ACTION_STATE_FLOAT } };
-		XrActionStateBoolean trigger_click_states[2] = { { XR_TYPE_ACTION_STATE_BOOLEAN }, { XR_TYPE_ACTION_STATE_BOOLEAN } };
-
-		XrActionStateGetInfo action_get_info = { XR_TYPE_ACTION_STATE_GET_INFO };
-		action_get_info.action = xr_trigger_action;
-		action_get_info.subactionPath = xr_hand_paths[0];
-		xrGetActionStateFloat(xr_session, &action_get_info, &trigger_states[0]);
-		action_get_info.subactionPath = xr_hand_paths[1];
-		xrGetActionStateFloat(xr_session, &action_get_info, &trigger_states[1]);
-		action_get_info.action = xr_trigger_click_action;
-		action_get_info.subactionPath = xr_hand_paths[0];
-		xrGetActionStateBoolean(xr_session, &action_get_info, &trigger_click_states[0]);
-		action_get_info.subactionPath = xr_hand_paths[1];
-		xrGetActionStateBoolean(xr_session, &action_get_info, &trigger_click_states[1]);
-
-                XrFrameBeginInfo frame_begin;
-                frame_begin.type = XR_TYPE_FRAME_BEGIN_INFO;
-                frame_begin.next = NULL;
-                result = xrBeginFrame(xr_session, &frame_begin);
-                assert(XR_SUCCEEDED(result));
-
-                int layer_count = 0;
-                XrCompositionLayerProjection layer = { XR_TYPE_COMPOSITION_LAYER_PROJECTION };
-                layer.layerFlags = 0; //XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-                layer.next = NULL;
-                layer.space = xr_stage_space;
-                const XrCompositionLayerBaseHeader * layers[1] = { (XrCompositionLayerBaseHeader *)&layer };
-
-                XrView views[8];
-                for (int i=0; i < xr_view_count; i++) {
-                        views[i].type = XR_TYPE_VIEW;
-                        views[i].next = NULL;
-                }
-
-                uint32_t view_count_out;
-                XrViewState view_state = { XR_TYPE_VIEW_STATE };
-
-                XrViewLocateInfo view_locate_info;
-                view_locate_info.type = XR_TYPE_VIEW_LOCATE_INFO;
-                view_locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                view_locate_info.displayTime = frame_state.predictedDisplayTime;
-                view_locate_info.space = xr_stage_space;
-                result = xrLocateViews(xr_session, &view_locate_info, &view_state, xr_view_count, &view_count_out, views);
-                assert(XR_SUCCEEDED(result));
-
-                XrCompositionLayerProjectionView projection_layer_views[8]{};
-
-                for (int i = 0; i < view_count_out; i++) {
-                        projection_layer_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-                        projection_layer_views[i].pose = views[i].pose;
-                        projection_layer_views[i].fov = views[i].fov;
-                        projection_layer_views[i].subImage.swapchain = xr_swapchains[i];
-                        projection_layer_views[i].subImage.imageRect.offset.x = 0;
-                        projection_layer_views[i].subImage.imageRect.offset.y = 0;
-                        projection_layer_views[i].subImage.imageRect.extent.width = xr_swapchain_widths[i];
-                        projection_layer_views[i].subImage.imageRect.extent.height = xr_swapchain_heights[i];
-                        projection_layer_views[i].subImage.imageArrayIndex = 0;
-                }
-
-                if (frame_state.shouldRender) {
-                        for (int v = 0; v < view_count_out; v++) {
-                                // Acquire and wait for the swapchain image
-                                uint32_t image_index;
-                                XrSwapchainImageAcquireInfo acquire_info = { XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-                                result = xrAcquireSwapchainImage(xr_swapchains[v], &acquire_info, &image_index);
-                                assert(XR_SUCCEEDED(result));
-
-                                XrSwapchainImageWaitInfo wait_info = { XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-                                wait_info.timeout = XR_INFINITE_DURATION;
-                                result = xrWaitSwapchainImage(xr_swapchains[v], &wait_info);
-                                assert(XR_SUCCEEDED(result));
-
-                                XrSwapchainImageOpenGLESKHR swapchain_image = xr_swapchain_images[v][image_index];
-                                uint32_t colour_tex = swapchain_image.image;
-                                int width = projection_layer_views[v].subImage.imageRect.extent.width;
-                                int height =  projection_layer_views[v].subImage.imageRect.extent.height;
-
-                                // Render to the swapchain directly
-                                glBindFramebuffer(GL_FRAMEBUFFER, xr_blit_framebuffer);
-                                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colour_tex, 0);
-                                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, xr_depth_targets[v], 0);
-                                glViewport(0, 0, width, height);
-                                glClearColor(0.2, 0.2, 0.2, 1);
-                                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-                                // Projection
-                                float left = projection_layer_views[v].fov.angleLeft;
-                                float right = projection_layer_views[v].fov.angleRight;
-                                float up = projection_layer_views[v].fov.angleUp;
-                                float down = projection_layer_views[v].fov.angleDown;
-                                float proj[16];
-                                matrix_proj_opengl(proj, left, right, up, down, 0.01, 100.0);
-
-                                // View
-                                float translation[16];
-                                matrix_identity(translation);
-                                matrix_translate(translation, translation, (float *)&projection_layer_views[v].pose.position);
-
-                                float rotation[16];
-                                matrix_rotation_from_quat(rotation, (float *)&projection_layer_views[v].pose.orientation);
-
-                                float view[16];
-                                matrix_multiply(view, translation, rotation);
-                                matrix_inverse(view, view);
-
-                                // View Proj
-                                float view_proj[16];
-                                matrix_multiply(view_proj, proj, view);
-
-                                // Left Model
-                                float left_translation[16];
-                                matrix_identity(left_translation);
-                                matrix_translate(left_translation, left_translation, (float *)&hand_locations[0].pose.position);
-
-                                float left_rotation[16];
-                                matrix_rotation_from_quat(left_rotation, (float *)&hand_locations[0].pose.orientation);
-
-                                float left_model[16];
-                                matrix_multiply(left_model, left_translation, left_rotation);
-
-                                // Right Model
-                                float right_translation[16];
-                                matrix_identity(right_translation);
-                                matrix_translate(right_translation, right_translation, (float *)&hand_locations[1].pose.position);
-
-                                float right_rotation[16];
-                                matrix_rotation_from_quat(right_rotation, (float *)&hand_locations[1].pose.orientation);
-
-                                float right_model[16];
-                                matrix_multiply(right_model, right_translation, right_rotation);
-
-                                // Render Left Hand
-                                float left_mvp[16];
-                                matrix_multiply(left_mvp, view_proj, left_model);
-                                glUseProgram(shader_prog);
-                                glUniformMatrix4fv(0, 1, GL_FALSE, left_mvp);
-                                glDrawArrays(GL_TRIANGLES, 0, 36);
-
-                                // Render Right Hand
-                                float right_mvp[16];
-                                matrix_multiply(right_mvp, view_proj, right_model);
-                                glUseProgram(shader_prog);
-                                glUniformMatrix4fv(0, 1, GL_FALSE, right_mvp);
-                                glDrawArrays(GL_TRIANGLES, 0, 36);
-
-                                XrSwapchainImageReleaseInfo release_info = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-                                result = xrReleaseSwapchainImage(xr_swapchains[v], &release_info);
-                                assert(XR_SUCCEEDED(result));
-                        }
-
-                        layer.viewCount = view_count_out;
-                        layer.views = projection_layer_views;
-                        layer_count = 1;
-                }
-
-                XrFrameEndInfo frame_end = { XR_TYPE_FRAME_END_INFO };
-                frame_end.displayTime = frame_state.predictedDisplayTime;
-                frame_end.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-                frame_end.layerCount = layer_count;
-                frame_end.layers = layers;
-
-                result = xrEndFrame(xr_session, &frame_end);
-                assert(XR_SUCCEEDED(result));
+        a.is_running = true;
+        while (a.is_running) {
+                app_update(&a);
         }
 
-
-
-        return;
+        app_shutdown(&a);
 }

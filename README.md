@@ -13,9 +13,12 @@ Just command line tool invocations, each explained. All the significant source c
 
 This repo is inspired by the work of `cnlohr` on [`tsopenxr`](https://github.com/cnlohr/tsopenxr). Much of the code
 here is based on that example of how to build a Quest 2 apk just using the plain command line tools. However I've adapted the code to be all in one place, and adapted the build to no
-longer depend on make, or tools like `zip` which are a bit awkward to get on windows.
+longer depend on make, or tools like `zip`.
 
 I also wrote [an article](https://cshenton.com/posts/quest2-native/) about what lead me to make this repo, if you're curious.
+
+Note: A previous version of this repo used `7z` to unpack and repack the `.apk`. Thanks to [Joel Auterson](https://www.joelotter.com/posts/2022/10/android-ndk-without-gradle/),
+who wrote a better article about manually making apk's long before I did, for helping me improve this repo!
 
 ## How to Build
 
@@ -32,8 +35,8 @@ The build process depends on the following executables:
 - `clang` the clang compiler that ships with the Android SDK (more specifically, the NDK)
 - `jarsigner` in the Android JDK, used to sign our apk (instead of apksigner, since we're Android < 30)
 - `keytool` in the Android JDK, used to generate a key store for signing
-- `7z` the 7zip executable, available for download [here](https://www.7-zip.org/download.html)
 - `zipalign` which is a zip alignment tool optimises the archive so it can be `mmap`ed, which ships with the Android SDK
+
 
 ### Paths
 
@@ -55,7 +58,6 @@ $ADB = "$ANDROID_SDK_HOME/platform-tools/adb.exe"
 $CLANG = "$ANDROID_LLVM/bin/clang"
 $JARSIGNER = "C:/Program Files/Android/jdk/jdk-8.0.302.8-hotspot/jdk8u302-b08/bin/jarsigner.exe"
 $KEYTOOL = "C:/Program Files/Android/jdk/jdk-8.0.302.8-hotspot/jdk8u302-b08/bin/keytool.exe"
-$SZIP = "C:/Program Files/7-Zip/7z.exe"
 $ZIPALIGN = "$ANDROID_SDK_HOME/build-tools/34.0.0/zipalign"
 ```
 
@@ -95,22 +97,15 @@ Compile the application with:
 
 ### Package, add application
 
-Copy our assets into the build directory, package it with aapt. Then using `7z`, unzip it to
-get the extra stuff from aapt, then zip it again with our compiled code included (yes it is 
-as silly as it sounds).
+Copy our assets into the build directory, package it with aapt to get an unsigned, unaligned
+apk.
 
 ```powershell
 cp -ea 0 -r assets build
 cp -ea 0 deps/lib/libopenxr_loader.so build/lib/arm64-v8a/
 
 & $AAPT package -f -F temp.apk -I $ANDROID_JAR -M src/AndroidManifest.xml `
-  -S resources -A build/assets -v --target-sdk-version 29
-
-& $SZIP x temp.apk -obuild -aoa
-rm -ea 0 -r build.apk
-cd build
-& $SZIP a -tzip -mx0 ../build.apk .
-cd ..
+  -S resources -A build/assets -v --target-sdk-version 29 build
 ```
 
 ### Sign and Align

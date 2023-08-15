@@ -15,6 +15,8 @@ This repo is inspired by the work of `cnlohr` on [`tsopenxr`](https://github.com
 here is based on that example of how to build a Quest 2 apk just using the plain command line tools. However I've adapted the code to be all in one place, and adapted the build to no
 longer depend on make, or tools like `zip` which are a bit awkward to get on windows.
 
+I also wrote [an article](https://cshenton.com/posts/quest2-native/) about what lead me to make this repo, if you're curious.
+
 ## How to Build
 
 First, ensure you have the relevant Android SDK, NDK, and build tools installed, the [official docs](https://developer.oculus.com/documentation/native/android/mobile-studio-setup-android/)

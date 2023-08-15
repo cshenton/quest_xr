@@ -4,6 +4,8 @@
 #define GL_APICALL
 #endif
 
+#define APPNAME "questxrexample"
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // INCLUDES
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -330,7 +332,7 @@ void matrix_multiply(float *result, float *m0, float *m1) {
 // APPLICATION STATE
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Some array lenth defines for readability
+// Some array length defines for readability
 #define HAND_COUNT (2)
 #define MAX_VIEWS (4)
 #define MAX_SWAPCHAIN_LENGTH (3)
@@ -694,18 +696,18 @@ void app_init_xr_create_stage_space(app_t *a) {
         XrResult result;
 
         // Create Space
-        uint32_t rerence_spaces_count;
-        XrReferenceSpaceType rerence_spaces[64];
-        result = xrEnumerateReferenceSpaces(a->session, 0, &rerence_spaces_count, NULL);
-        assert(XR_SUCCEEDED(result) && rerence_spaces_count <= 64);
-        for (int i = 0; i < rerence_spaces_count; i++) {
-                rerence_spaces[i] = XR_REFERENCE_SPACE_TYPE_VIEW;
+        uint32_t reference_spaces_count;
+        XrReferenceSpaceType reference_spaces[64];
+        result = xrEnumerateReferenceSpaces(a->session, 0, &reference_spaces_count, NULL);
+        assert(XR_SUCCEEDED(result) && reference_spaces_count <= 64);
+        for (int i = 0; i < reference_spaces_count; i++) {
+                reference_spaces[i] = XR_REFERENCE_SPACE_TYPE_VIEW;
         }
-        result = xrEnumerateReferenceSpaces(a->session, rerence_spaces_count, &rerence_spaces_count, rerence_spaces);
+        result = xrEnumerateReferenceSpaces(a->session, reference_spaces_count, &reference_spaces_count, reference_spaces);
         assert(XR_SUCCEEDED(result));
         printf("Reference Spaces:\n");
-        for (int i = 0; i < rerence_spaces_count; i++) {
-                switch (rerence_spaces[i]) {
+        for (int i = 0; i < reference_spaces_count; i++) {
+                switch (reference_spaces[i]) {
                 case XR_REFERENCE_SPACE_TYPE_VIEW:
                         printf("	XR_REFERENCE_SPACE_TYPE_VIEW\n");
                         break;
@@ -716,7 +718,7 @@ void app_init_xr_create_stage_space(app_t *a) {
                         printf("	XR_REFERENCE_SPACE_TYPE_STAGE\n");
                         break;
                 default:
-                        printf("	XR_REFERENCE_SPACE_TYPE_%d\n", rerence_spaces[i]);
+                        printf("	XR_REFERENCE_SPACE_TYPE_%d\n", reference_spaces[i]);
                         break;
                 }
         }
@@ -1114,6 +1116,7 @@ void app_update_pump_events(app_t *a) {
         while (is_remaining_events) {
                 XrEventDataBuffer event_data = { XR_TYPE_EVENT_DATA_BUFFER };
                 XrResult result = xrPollEvent(a->instance, &event_data);
+                assert(XR_SUCCEEDED(result));
                 if (result != XR_SUCCESS) {
                         is_remaining_events = false;
                         continue;
@@ -1313,12 +1316,6 @@ void app_update_render(app_t *a) {
                 glClearColor(0.4, 0.4, 0.8, 1);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-                // Render Background
-                glUseProgram(a->background_program);
-                glUniformMatrix4fv(0, 1, GL_FALSE, view_proj);
-                glUniform3fv(1, 1, (float *)&a->hand_locations[0].pose.position);
-                glDrawArrays(GL_TRIANGLES, 0, 3);
-
                 // Render Left Hand
                 glUseProgram(a->box_program);
                 glUniformMatrix4fv(0, 1, GL_FALSE, left_mvp);
@@ -1330,6 +1327,12 @@ void app_update_render(app_t *a) {
                 glUniformMatrix4fv(0, 1, GL_FALSE, right_mvp);
                 glUniform2f(1, a->trigger_states[1].currentState, (float)(a->trigger_click_states[1].currentState));
                 glDrawArrays(GL_TRIANGLES, 0, 36);
+                
+                // Render Background
+                glUseProgram(a->background_program);
+                glUniformMatrix4fv(0, 1, GL_FALSE, view_proj);
+                glUniform3fv(1, 1, (float *)&a->hand_locations[0].pose.position);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
 
                 // Release Image
                 XrSwapchainImageReleaseInfo release_info = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };

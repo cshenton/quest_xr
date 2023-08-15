@@ -26,6 +26,8 @@
 #include "android_native_app_glue.h"
 #include <android/log.h>
 
+#define APPNAME "questxrexample"
+
 #define LOGI(...) ((void)printf(__VA_ARGS__))
 #define LOGE(...) ((void)printf(__VA_ARGS__))
 

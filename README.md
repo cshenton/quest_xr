@@ -9,7 +9,7 @@ powershell.
 
 Just command line tool invocations, each explained. All the significant source code is in a single C++ file `src/main.cpp`.
 
-![The working example](./quest_xr_example.jpg)
+[![Watch the video](./quest_xr_example.jpg)](https://youtube.com/shorts/CKk1UkBykiI)
 
 This repo is inspired by the work of `cnlohr` on [`tsopenxr`](https://github.com/cnlohr/tsopenxr). Much of the code
 here is based on that example of how to build a Quest 2 apk just using the plain command line tools. However I've adapted the code to be all in one place, and adapted the build to no
@@ -176,6 +176,7 @@ is that you need to change the string `cshenton` to your org name and `questxrex
 
 - `resources/values/strings.xml`
 - `src/AndroidManifest.xml`
+- `src/main.cpp`
 - `deps/src/android_native_app_glue.c`, yes powershell refused to not eat the quotes in `-DAPPNAME="questxrexample"` so I caved
 - The above build "script"
   - `-o build/lib/arm64-v8a/libquestxrexample.so`

@@ -9,6 +9,8 @@ powershell.
 
 Just command line tool invocations, each explained. All the significant source code is in a single C++ file `src/main.cpp`.
 
+![The working example](./quest_xr_example.jpg)
+
 This repo is inspired by the work of `cnlohr` on [`tsopenxr`](https://github.com/cnlohr/tsopenxr). Much of the code
 here is based on that example of how to build a Quest 2 apk just using the plain command line tools. However I've adapted the code to be all in one place, and adapted the build to no
 longer depend on make, or tools like `zip` which are a bit awkward to get on windows.
